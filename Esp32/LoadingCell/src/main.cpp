@@ -5,8 +5,8 @@
 NAU7802 myScale; //Create instance of the NAU7802 class
 
 //EEPROM locations to store 4-byte variables
-#define LOCATION_CALIBRATION_FACTOR 0 //Float, requires 4 bytes of EEPROM
-#define LOCATION_ZERO_OFFSET 10 //Must be more than 4 away from previous spot. Long, requires 4 bytes of EEPROM
+#define LOCATION_CALIBRATION_FACTOR 452.40 //Float, requires 4 bytes of EEPROM
+#define LOCATION_ZERO_OFFSET -93978 //Must be more than 4 away from previous spot. Long, requires 4 bytes of EEPROM
 
 bool settingsDetected = false; //Used to prompt user to calibrate their scale
 
@@ -63,7 +63,6 @@ void loop()
   {
     gramm = wiegen();
   }
-  
   rpm = gramm2rpm(gramm);
   Serial.print(rpm);
   Serial2.print(rpm);
