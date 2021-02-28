@@ -2,7 +2,7 @@
 #include <EEPROM.h> //Needed to record user settings
 #include "SparkFun_Qwiic_Scale_NAU7802_Arduino_Library.h" // Click here to get the library: http://librarymanager/All#SparkFun_NAU8702
 #include <string.h>
-
+#include <time.h>
 #include <Wire.h>
 
 NAU7802 myScale; //Create instance of the NAU7802 class
@@ -57,30 +57,31 @@ int numb;
 String cmd = "\"";
 int Zustand = 1;
 int Zustand_alt = 0;
+//Scale
 void calibrateScale(void);
 void recordSystemSettings(void);
 void readSystemSettings(void);
+//Funktionen
 float wiegen(void);
 bool malen(int gewicht, int rpm, int zielgewicht);
-void screenfertig(void);
+void reset(void);
 
-void screensettingrpm(int rpm);
-
-
-
-
-
+//Screen
 void ScreenInit(void);
 void ScaleInit(void);
 void screenWritingtext(String text);
 void screenwiegen(float aktuellgewicht, int zielgewicht);
 void screensettinggewicht(int zielgewicht);
 void screengewichtoderrpm(bool gewichtoderrpm);
+void screensettingrpm(int rpm);
+void screen1kaffeeoder2kaffee(bool kaffee1oder2);
+void screenfertig(void);
 
-void page_statistik();
-void page_abbruch();
-void page_set();
-void page_main();
+//Pages
+void page_statistik(void);
+void page_abbruch(void);
+void page_set(void);
+void page_main(void);
 
 
 void setup()
@@ -111,6 +112,7 @@ void loop()
     screenWritingtext("Bereit!");
     if(Zustand_alt != Zustand) 
     { 
+      Zustand_alt = Zustand;
       page_main();
       screenWritingtext("Bereit!");
     }
@@ -124,7 +126,11 @@ void loop()
     if(var_statistik) Zustand = z_statistik;
       break;
   case z_wiegen: // Wiegen
-    if(Zustand_alt != Zustand) page_main();
+    if(Zustand_alt != Zustand)
+    {
+      Zustand_alt = Zustand;
+      page_main();
+    }
     //if(myScale.available() == false) 
     //{
     //  Zustand = 0;
@@ -148,16 +154,26 @@ void loop()
     }
     break;
   case z_fertig: // Fertig
-    if(Zustand_alt != Zustand) page_main();
+    if(Zustand_alt != Zustand)
+    {
+      Zustand_alt = Zustand;
+      page_main();
+    }
     screenfertig();
     gewicht = wiegen();
     if (int(gewicht) <= 10) Zustand = 1;
     if (var_stop) Zustand = 1;
     break;
   case z_settings: // Setting
-    if(Zustand_alt != Zustand) page_set();
+    if(Zustand_alt != Zustand)
+    {
+      Zustand_alt = Zustand;
+      page_set();
+    }
+    screen1kaffeeoder2kaffee(var_1oder2);
+
     if (var_stop) Zustand = z_home;
-    if (var_set) var_1oder2 += 1;
+    if (var_set) var_gewichtoderrpm = !var_gewichtoderrpm;
     if (var_1kaffee) var_1oder2 = true;
     if (var_2kaffee) var_1oder2 = false;
     if (var_1oder2 == 1) // kaffee 1
@@ -194,26 +210,23 @@ void loop()
     }
     break;
   case z_abbruch: // Abbruch
-    if(Zustand_alt != Zustand) page_abbruch();
+    if(Zustand_alt != Zustand)
+    {
+      Zustand_alt = Zustand;
+      page_abbruch();
+    }
     if(var_stop) Zustand = z_home;
     break;
-  case z_statistik: // Stattistik
+  case z_statistik: // Statistik
     break;    
   default: // Error
-    Zustand = 1;
+    Serial.println("Error");
+    if (var_stop) Zustand = z_home;
     break;
   }
-  Zustand_alt = Zustand;
 
 
-  var_set = 0;
-  var_stop = 0;
-  var_start= 0;
-  var_plus= 0;
-  var_minus= 0;
-  var_1kaffee= 0;
-  var_2kaffee= 0;
-  var_statistik= 0;
+  reset();
 
 
   if (Serial.available())
@@ -454,49 +467,35 @@ void ScaleInit(void)
 
 // Für jeden Zustand wird eine Seite erstellt.
 
-void page_main() {
+void page_main(void) {
   Serial1.print("page page0");
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("page page0");
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF);
-  }
+}
 
-void page_set() {
+void page_set(void) {
   Serial1.print("page page1");
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("page page1");
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF);
-  }
 
-void page_abbruch() {
+}
+
+void page_abbruch(void) {
   Serial1.print("page page2");
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("page page2");
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF);
-  }
 
-void page_statistik() {
+}
+
+void page_statistik(void) {
   Serial1.print("page page3");
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("page page3");
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF);
-  }
+}
 
 void screenwiegen(float aktuellgewicht, int zielgewicht)
 {
@@ -508,11 +507,8 @@ void screenwiegen(float aktuellgewicht, int zielgewicht)
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t0.txt=" + cmd + aktuellgewicht + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
 }
+
 void screenWritingtext(String text)
 {
   Serial.print("Home");
@@ -522,11 +518,6 @@ void screenWritingtext(String text)
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t0.txt=" + cmd + text + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
-
 }
 
 
@@ -539,15 +530,11 @@ void screenfertig(void)
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t0.txt=" + cmd + "Fertig!" + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
 }
 
 void screensettinggewicht(int zielgewicht)
 {
-  Serial.print("Setting");
+  Serial.print("Setting gewicht");
   Serial.print("\n");
   // Bildschim initialisieren
   Serial1.print("t3.txt=" + cmd + zielgewicht + cmd);
@@ -562,7 +549,7 @@ void screensettinggewicht(int zielgewicht)
 
 void screensettingrpm(int rpm)
 {
-  Serial.print("Setting");
+  Serial.print("Setting RPM");
   Serial.print("\n");
 
   // Bildschim initialisieren
@@ -570,10 +557,6 @@ void screensettingrpm(int rpm)
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t4.txt=" + cmd + rpm + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
 }
 
 void screengewichtoderrpm(bool gewichtoderrpm)
@@ -586,16 +569,27 @@ void screengewichtoderrpm(bool gewichtoderrpm)
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
-    Serial1.print("p0.txt=" + cmd + 1 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-    // Bildschim initialisieren
+
     Serial1.print("p1.pic=" + cmd + 0 + cmd);
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
-    Serial1.print("p1.txt=" + cmd + 0 + cmd);
+
+
+    // Bildschim initialisieren
+    Serial1.print("t1.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("t3.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("t2.bco=65525");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("t4.bco=65525");
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
@@ -607,23 +601,61 @@ void screengewichtoderrpm(bool gewichtoderrpm)
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
-    Serial1.print("p0.txt=" + cmd + 0 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
 
     Serial1.print("p1.pic=" + cmd + 1 + cmd);
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
-    Serial1.print("p1.txt=" + cmd + 1 + cmd);
+
+    // Bildschim initialisieren
+    Serial1.print("t1.bco=65525");
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
+    Serial1.print("t3.bco=65525");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("t2.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("t4.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF); 
   }
   
 
 }
+
+void screen1kaffeeoder2kaffee(bool kaffee1oder2)
+{
+  if (kaffee1oder2)
+  {
+    // Bildschim initialisieren
+    Serial1.print("b3.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("b4.bco=0");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF); 
+  }
+  else{
+    // Bildschim initialisieren
+    Serial1.print("b3.bco=0");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF);
+    Serial1.print("b4.bco=40179");
+    Serial1.write(0xFF);
+    Serial1.write(0xFF); 
+    Serial1.write(0xFF); 
+  }
+}
+
 
 bool malen(int gewicht, int rpm, int zielgewicht)
 {
@@ -644,4 +676,17 @@ bool malen(int gewicht, int rpm, int zielgewicht)
   {
     return true;
   }
+}
+
+
+void reset(void)
+{
+  var_set = 0;
+  var_stop = 0;
+  var_start= 0;
+  var_plus= 0;
+  var_minus= 0;
+  var_1kaffee= 0;
+  var_2kaffee= 0;
+  var_statistik= 0;
 }
