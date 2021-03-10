@@ -10,12 +10,14 @@ NAU7802 myScale; //Create instance of the NAU7802 class
 
 //EEPROM locations to store 4-byte variables
 #define LOCATION_CALIBRATION_FACTOR 0 //Float, requires 4 bytes of EEPROM
-#define LOCATION_ZERO_OFFSET 10 //Must be more than 4 away from previous spot. Long, requires 4 bytes of EEPROM
-#define LOCATION_Siebtraeger 20
-#define LOCATION_gewicht_1 30
-#define LOCATION_rpm_1 40
-#define LOCATION_gewicht_2 50
-#define LOCATION_rpm_2 60
+#define LOCATION_ZERO_OFFSET 5 //Must be more than 4 away from previous spot. Long, requires 4 bytes of EEPROM
+#define LOCATION_Siebtraeger 10
+#define LOCATION_gewicht_1 15
+#define LOCATION_rpm_1 20
+#define LOCATION_gewicht_2 25
+#define LOCATION_rpm_2 30
+#define LOCATION_Throughput_number 35
+#define LOCATION_first_start 40
 
 bool settingsDetected = false; //Used to prompt user to calibrate their scale
 
@@ -75,17 +77,19 @@ bool var_statistik_release = 0;
 
 int var_gewichtoderrpm = 0; // 1 Gewicht 0 rpm
 bool var_1oder2 = 1;        // 1 1Kaffee 0 2Kaffee
-int var_gewicht_1kaffee = 30;
-int var_rpm_1kaffee = 1000;
-int var_gewicht_2kaffee = 35;
-int var_rpm_2kaffee = 2000;
+float var_gewicht_1kaffee = 30;
+float var_rpm_1kaffee = 1000;
+float var_gewicht_2kaffee = 35;
+float var_rpm_2kaffee = 2000;
 bool finish = 0;
 bool press_stop_again=false;
 
-bool var_automode=false; // True=>automatischer start bei Erkennung des leeren Siebträgers
-float Siebtraeger_leer=0;
-float gewicht_Delta_ok=0.5; //Gewichtsabweichung für Fertig, Startklar...
+int var_thoughput_number = 0;
 
+bool var_automode=false; // True=>automatischer start bei Erkennung des leeren Siebträgers
+float var_Siebtraeger_leer=0;
+float gewicht_Delta_ok=0.5; //Gewichtsabweichung für Fertig, Startklar...
+bool first_start;
 
 float gewicht;
 float rpm;
@@ -94,6 +98,21 @@ String cmd = "\"";
 int Zustand = 1;
 int Zustand_alt = 0;
 int Calib_schritt=0;
+
+// variables will change:
+// variable for reading the pushbutton status
+int buttonState_up = 0;
+int buttonState_down = 0; 
+// value is controled by the two buttons
+int value=0;
+// used to meassure how long the buttons a pressd
+unsigned long time_up;
+unsigned long time_down;
+// inkrement to change the value
+int inkrement=1;
+// used to adjust the inkrement
+int i=0;
+
 
 //Taster input
 void read_taster(void);
@@ -105,21 +124,24 @@ void recordSystemSettings(void);
 void readSystemSettings(void);
 //Funktionen
 float wiegen(void);
-bool malen(int gewicht, int rpm, int zielgewicht);
+bool mahlen(float gewicht, float rpm, float zielgewicht);
 void reset(void);
+void zurueck(void);
 
 //Screen
 void ScreenInit(void);
 void ScaleInit(void);
 void screenWritingtext(String text);
-void screenwiegen(float aktuellgewicht, int zielgewicht);
-void screensettinggewicht(int zielgewicht);
+void screenwiegen(float aktuellgewicht, float zielgewicht);
+void screensettinggewicht(float zielgewicht);
 void screengewichtoderrpm(int gewichtoderrpm);
-void screensettingrpm(int rpm);
+void screensettingrpm(float rpm);
 void screensetting_automode(bool var_automode);
 void screen1kaffeeoder2kaffee(bool kaffee1oder2);
 void screenfertig(void);
 void screencalibtext(void);
+void screencalibgewicht(void);
+
 
 //Pages
 void page_statistik(void);
@@ -128,12 +150,23 @@ void page_set(void);
 void page_main(void);
 void page_calib(void);
 
-
 void setup()
 {
+  // Clearen von EEPROM falls var NAN
+
+  //EEPROM.get(LOCATION_first_start, first_start);
+  //if (first_start == 0)
+  //{
+  //  first_start += 1;
+  //  EEPROM.put(LOCATION_first_start, first_start);
+  //  for (int i = 0 ; i < EEPROM.length() ; i++) {
+  //  EEPROM.write(i, 0);
+  //}
+  //}
+  
+  Zustand = z_home;
+
   Serial.begin(9600);
-  //Serial1.begin(9600, RXD, TXD);  //Screen
-  //Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2); // Arduino
   Serial1.begin(9600);  //Screen
   Serial2.begin(9600);  //Arduino
 
@@ -151,14 +184,16 @@ void setup()
   pinMode(pin_minus, INPUT);
   pinMode(pin_plus, INPUT);
 
-  readSystemSettings();
 }
 
 void loop()
-{ read_taster();
+{ 
+  read_taster();
   //test_taster();
   //Serial.print(Zustand);
-  //Serial.print("\n");
+  //Serial.print(gewicht);
+  //gewicht = wiegen();
+  //Serial.print(var_gewicht_2kaffee);
 
   switch (Zustand)
   {
@@ -184,8 +219,7 @@ void loop()
     }
     if(var_set_release) Zustand = z_settings;
     if(var_cali_release) Zustand = z_calib;
-    gewicht = wiegen();
-    if((var_1kaffee && !var_automode) || (var_2kaffee && !var_automode) || (var_automode && (Siebtraeger_leer-gewicht_Delta_ok <= gewicht && gewicht <= Siebtraeger_leer+gewicht_Delta_ok)))
+    if((var_1kaffee && !var_automode) || (var_2kaffee && !var_automode) || (var_automode && (var_Siebtraeger_leer-gewicht_Delta_ok <= gewicht && gewicht <= var_Siebtraeger_leer+gewicht_Delta_ok)))
     {
       Zustand = z_wiegen;
       if (var_1kaffee&& !var_automode) var_1oder2 = 1; //Nur Variablen Auswahl
@@ -199,26 +233,21 @@ void loop()
       Zustand_alt = Zustand;
       page_main();
     }
-    //if(myScale.available() == false) 
-    //{
-    //  Zustand = 0;
-    //  break;
-    //}
     if(var_stop) Zustand = z_abbruch;
 
     if(var_1oder2 == 1) // 1Kaffee
     {
       gewicht = wiegen();
-      finish = malen(int(gewicht),  var_rpm_1kaffee,  var_gewicht_1kaffee);
+      finish = mahlen(gewicht,  (var_rpm_1kaffee+var_Siebtraeger_leer),  (var_gewicht_1kaffee+var_Siebtraeger_leer));
       if(finish) Zustand = z_fertig;
-      screenwiegen(gewicht,  var_gewicht_1kaffee);
+      screenwiegen((gewicht - var_Siebtraeger_leer),  var_gewicht_1kaffee);
     }
     else   //2Kaffee
     {  
       gewicht = wiegen();
-      finish = malen(int(gewicht),  var_rpm_2kaffee,  var_gewicht_2kaffee);
+      finish = mahlen(gewicht,  (var_rpm_2kaffee+var_Siebtraeger_leer),  (var_gewicht_2kaffee+var_Siebtraeger_leer));
       if(finish) Zustand = z_fertig;
-      screenwiegen( gewicht,  var_gewicht_2kaffee);
+      screenwiegen((gewicht - var_Siebtraeger_leer),  var_gewicht_2kaffee);
     }
     break;
   case z_fertig: // Fertig
@@ -299,6 +328,7 @@ void loop()
     }
     break;
   case z_abbruch: // Abbruch
+    analogWrite(pin_PWM,0); 
     if(Zustand_alt != Zustand)
     {
       Zustand_alt = Zustand;
@@ -328,19 +358,22 @@ void loop()
     }
       switch(Calib_schritt){
         case 2:
-          //"Gewicht entnehmen und siebträger einsetzen." Anzeigen!!!
-          screencalibtext();
+          screenWritingtext("Gewicht entnehmen und Siebtraeger einsetzen. Mit Calib. Taste fortfahren");
           Serial.println("Gewicht entnehmen und siebträger einsetzen.");
+          screencalibgewicht();
+
           //bei Calib taste drücken und loslassen
           if(var_cali_release){
             //Gewicht des leeren Siebträgers Speichern!!!
-            Siebtraeger_leer=wiegen();
+            var_Siebtraeger_leer=wiegen();
             Calib_schritt=3;
           }
           break;
         case 1:
           //"100 gramm einsetzen." Anzeigen
-          screencalibtext();
+          screenWritingtext("100 gramm einsetzen. Mit Calib. Taste fortfahren");
+          screencalibgewicht();
+
           Serial.println("100 gramm einsetzen.");
           //bei Calib taste drücken und loslassen
           if(var_cali_release){
@@ -351,7 +384,9 @@ void loop()
           break;
         case 0:
           //"Aufnahme leeren." Anzeigen
-          screencalibtext();
+          screenWritingtext("Aufnahme leeren. Mit Calib. Taste fortfahren");
+          screencalibgewicht();
+
           Serial.println("Aufnahme leeren.");
           //bei Calib taste drücken und loslassen 
           if(var_cali_release){
@@ -361,7 +396,8 @@ void loop()
           }
           break;
         case 3:
-          screencalibtext();
+          screenWritingtext("Fertig!");
+          screencalibgewicht();
           recordSystemSettings(); //Commit these values to EEPROM
           delay(3000);
           Zustand = z_home;
@@ -385,7 +421,7 @@ void recordSystemSettings(void)
   //Get various values from the library and commit them to NVM
   EEPROM.put(LOCATION_CALIBRATION_FACTOR, myScale.getCalibrationFactor());
   EEPROM.put(LOCATION_ZERO_OFFSET, myScale.getZeroOffset());
-  EEPROM.put(LOCATION_Siebtraeger, Siebtraeger_leer);
+  EEPROM.put(LOCATION_Siebtraeger, var_Siebtraeger_leer);
 }
 
 //Reads the current system settings from EEPROM
@@ -420,44 +456,59 @@ void readSystemSettings(void)
     settingsDetected = false; //Defaults detected. Prompt user to cal scale.
 
   //Siebträger leergewicht
-  EEPROM.get(LOCATION_Siebtraeger, Siebtraeger_leer);
-  if (Siebtraeger_leer == 0xFFFFFFFF)
+  EEPROM.get(LOCATION_Siebtraeger, var_Siebtraeger_leer);
+  if (var_Siebtraeger_leer == 0 || var_Siebtraeger_leer == NAN || var_Siebtraeger_leer == 0xFFFFFFFF)
   {
-    Siebtraeger_leer = 500L; //Default to 1000 so we don't get inf
-    EEPROM.put(LOCATION_Siebtraeger, Siebtraeger_leer);
+    var_Siebtraeger_leer = 514; //Default to 1000 so we don't get inf
+    EEPROM.put(LOCATION_Siebtraeger, var_Siebtraeger_leer);
   }
 
   //var_gewicht_1kaffee
   EEPROM.get(LOCATION_gewicht_1, var_gewicht_1kaffee);
-  if (var_gewicht_1kaffee == 0xFFFFFFFF)
+  if (var_gewicht_1kaffee == 0 || var_gewicht_1kaffee == NAN)
   {
-    var_gewicht_1kaffee = 30L; //Default to 1000 so we don't get inf
+    var_gewicht_1kaffee = 25; //Default to 1000 so we don't get inf
     EEPROM.put(LOCATION_gewicht_1, var_gewicht_1kaffee);
   }
+
   //var_gewicht_2kaffee
   EEPROM.get(LOCATION_gewicht_2, var_gewicht_2kaffee);
-  if (var_gewicht_2kaffee == 0xFFFFFFFF)
+  if (var_gewicht_2kaffee == 0 || var_gewicht_2kaffee == NAN)
   {
-    var_gewicht_2kaffee = 35L; //Default to 1000 so we don't get inf
+    var_gewicht_2kaffee = 35; //Default to 1000 so we don't get inf
     EEPROM.put(LOCATION_gewicht_2, var_gewicht_2kaffee);
   }
   //var_rpm_1kaffee
   EEPROM.get(LOCATION_rpm_1, var_rpm_1kaffee);
-  if (var_rpm_1kaffee == 0xFFFFFFFF)
+  if (var_rpm_1kaffee == 0 || var_rpm_1kaffee == NAN)
   {
-    var_rpm_1kaffee = 1000L; //Default to 1000 so we don't get inf
+    var_rpm_1kaffee = 1000; //Default to 1000 so we don't get inf
     EEPROM.put(LOCATION_rpm_1, var_rpm_1kaffee);
   }
   //var_rpm_2kaffee
   EEPROM.get(LOCATION_rpm_2, var_rpm_2kaffee);
-  if (var_rpm_2kaffee == 0xFFFFFFFF)
+  if (var_rpm_2kaffee == 0 || var_rpm_2kaffee == NAN)
   {
-    var_rpm_2kaffee = 2000L; //Default to 1000 so we don't get inf
+    var_rpm_2kaffee = 2000; //Default to 1000 so we don't get inf
     EEPROM.put(LOCATION_rpm_2, var_rpm_2kaffee);
   }
-  
-}
 
+  //Look up the calibration factor
+  EEPROM.get(LOCATION_Throughput_number, var_thoughput_number);
+  if (var_thoughput_number == 0 || var_thoughput_number == NAN)
+  {
+    var_thoughput_number = 0; //Default to 0
+    EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
+  }
+  
+  EEPROM.get(LOCATION_first_start, first_start);
+  if (first_start == 0 || first_start == NAN)
+  {
+    first_start = 0; //Default to 0
+    EEPROM.put(LOCATION_first_start, first_start);
+  }
+
+}
 
 float wiegen(void)
 {
@@ -491,12 +542,10 @@ float wiegen(void)
   return avgWeight;
 }
 
-
-float gramm2rpm(int gramm)
+float gramm2rpm(float gramm)
 {
   return gramm*100;
 }
-
 
 void ScreenInit(void)
 {
@@ -524,7 +573,12 @@ void ScaleInit(void)
   }
   Serial.println("Scale detected!");
 
+
+  Serial.print("Bevor Readsetting");
+  Serial.print(var_gewicht_2kaffee);
   readSystemSettings(); //Load zeroOffset and calibrationFactor from EEPROM
+  Serial.print("nach Settings");
+  Serial.print(var_gewicht_2kaffee);
 
   myScale.setSampleRate(NAU7802_SPS_320); //Increase to max sample rate
   myScale.calibrateAFE(); //Re-cal analog front end when we change gain, sample rate, or channel 
@@ -566,7 +620,7 @@ void page_set(void) {
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t6.txt=" + cmd + Siebtraeger_leer + cmd);
+  Serial1.print("t6.txt=" + cmd + var_Siebtraeger_leer + cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -603,7 +657,7 @@ void page_calib(void){
   Serial1.write(0xFF);
 }
 
-void screenwiegen(float aktuellgewicht, int zielgewicht)
+void screenwiegen(float aktuellgewicht, float zielgewicht)
 {
   
   Serial.print("Wiegen");
@@ -626,6 +680,15 @@ void screenWritingtext(String text)
   Serial1.write(0xFF);
 }
 
+void screencalibgewicht(void)
+{
+  float tmp_gewicht = 0;
+  tmp_gewicht = wiegen();
+  Serial1.print("t2.txt=" + cmd + tmp_gewicht + cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF);
+}
 
 void screenfertig(void)
 {
@@ -638,7 +701,7 @@ void screenfertig(void)
   Serial1.write(0xFF);
 }
 
-void screensettinggewicht(int zielgewicht)
+void screensettinggewicht(float zielgewicht)
 {
   Serial.print("Setting gewicht");
   Serial.print("\n");
@@ -666,7 +729,7 @@ void screensettinggewicht(int zielgewicht)
   }
 }
 
-void screensettingrpm(int rpm)
+void screensettingrpm(float rpm)
 {
   Serial.print("Setting RPM");
   Serial.print("\n");
@@ -844,26 +907,11 @@ void screen1kaffeeoder2kaffee(bool kaffee1oder2)
   }
 }
 
-void screencalibtext(void){
-  switch(Calib_schritt){
-    case 0:
-      screenWritingtext("Aufnahme leeren. Mit Calib. Taste Vortfahren");
-      break;
-    case 1:
-      screenWritingtext("100 gramm einsetzen. Mit Calib. Taste Vortfahren");
-      break;
-    case 2:
-      screenWritingtext("Gewicht entnehmen und Siebträger einsetzen. Mit Calib. Taste Vortfahren");
-      break;
-    case 3:
-      screenWritingtext("Fertig!");
-      break;
-  }
-}
-
-bool malen(int gewicht, int rpm, int zielgewicht)
+bool mahlen(float gewicht, float rpm, float zielgewicht)
 {
-  int volt = rpm/(3000/255); //Mahllogic
+  var_thoughput_number += 1;
+  EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
+  float volt = rpm/(3000/255); //Mahllogic
   
 
   if (gewicht > zielgewicht)
@@ -881,7 +929,6 @@ bool malen(int gewicht, int rpm, int zielgewicht)
     return true;
   }
 }
-
 
 void reset(void)
 {
@@ -974,5 +1021,14 @@ bool release(int pin, bool alter_zustand){
   }
   else{
     return false;
+  }
+}
+
+void zurueck(void)
+{
+  if(press_stop_again&&var_stop_release){
+  Zustand = z_home;
+  press_stop_again=false;
+
   }
 }
