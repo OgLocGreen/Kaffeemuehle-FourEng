@@ -5,6 +5,10 @@
 #include <string.h>
 #include <time.h>
 #include <Wire.h>
+#include <BME280_t.h>
+
+
+
 
 NAU7802 myScale; //Create instance of the NAU7802 class
 
@@ -114,6 +118,12 @@ int inkrement=1;
 int i=0;
 
 
+//BME Sensor
+#define ASCII_ESC 27
+#define MYALTITUDE  150.50
+char bufout[10];
+BME280<> BMESensor; 
+
 //Taster input
 void read_taster(void);
 void test_taster(void);
@@ -122,11 +132,18 @@ bool release(int pin, bool alter_zustand);
 //void calibrateScale(void);
 void recordSystemSettings(void);
 void readSystemSettings(void);
+
+//Bme Sensor
+void BmeInit(void);
+
+
 //Funktionen
 float wiegen(void);
 bool mahlen(float gewicht, float rpm, float zielgewicht);
 void reset(void);
 void zurueck(void);
+
+
 
 //Screen
 void ScreenInit(void);
@@ -173,6 +190,9 @@ void setup()
   ScaleInit();
   ScreenInit();
 
+                                               // initialize I2C that connects to sensor
+  BMESensor.begin();                                                    // initalize bme280 sensor
+
   pinMode(pin_PWM, OUTPUT);
 
   pinMode(pin_set, INPUT);
@@ -194,6 +214,9 @@ void loop()
   //Serial.print(gewicht);
   //gewicht = wiegen();
   //Serial.print(var_gewicht_2kaffee);
+  Wire.begin();
+  BMESensor.refresh();
+
 
   switch (Zustand)
   {
@@ -290,7 +313,49 @@ void loop()
       {
         if (var_plus) var_gewicht_1kaffee +=1;
         if (var_minus) var_gewicht_1kaffee -=1;
+
+        /*
+        while (digitalRead(var_plus) == HIGH)
+        {
+          if(value<(32767+1-inkrement)) {                 //used to not get a overflow
+            value=value+inkrement;
+          }
+          if(value+inkrement >= 32767){value = 32767;}
+          Serial.println(value);                        //"returns" Value
+          time_up = millis();
+          while (millis() - time_up < 1000/(i+1) and digitalRead(var_plus) == HIGH){   //Mit der While Funktion ist die Zeit am anfang Lange und am ende Kurz die er Wartet um Hochzuzählen.
+            //do nothing
+            inkrement=i;
+          }
+          i++;
+        }
+
+        // same as Counting UP but DOWN---------------
+        while (digitalRead(var_minus) == HIGH)
+        {
+          if(value>(-32768-1+inkrement)) {
+            value=value-inkrement;
+          }
+          else{
+            value=-32768;
+          }
+          Serial.println(value);
+          time_down = millis();
+          while (millis() - time_down < 1000/(i+1) and digitalRead(var_minus) == HIGH){
+            //do nothing
+            inkrement=i;
+          }
+          i++;
+        }
+
+      //resets the inkrement and index i after realesing the buttons
+      if (var_minus_release == LOW and var_plus_release == LOW) {
+        i=0;
+        inkrement=1;
       }
+      */
+    }
+
       if(var_gewichtoderrpm == 1) // rpm
       { 
         if (var_plus) var_rpm_1kaffee +=1;
@@ -588,7 +653,6 @@ void ScaleInit(void)
   Serial.print("Calibration factor: ");
   Serial.println(myScale.getCalibrationFactor());
 }
-
 
 // Für jeden Zustand wird eine Seite erstellt.
 
