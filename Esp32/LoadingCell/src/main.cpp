@@ -45,7 +45,7 @@ byte avgWeightSpot = 0;
 #define pin_plus 6
 
 #define z_home 1
-#define z_wiegen 2
+#define z_mahlen 2
 #define z_fertig 3
 #define z_settings 4 
 #define z_abbruch 5
@@ -118,6 +118,10 @@ int inkrement=1;
 int i=0;
 
 
+int counter;
+int secondsHeld;
+
+
 //BME Sensor
 #define ASCII_ESC 27
 #define MYALTITUDE  150.50
@@ -143,7 +147,7 @@ bool mahlen(float gewicht, float rpm, float zielgewicht);
 void reset(void);
 void zurueck(void);
 float zaehlen(float value, int stelle);
-
+float setValue(float value,int stelle = 0);
 
 
 //Screen
@@ -245,13 +249,13 @@ void loop()
     if(var_cali_release) Zustand = z_calib;
     if((var_1kaffee && !var_automode) || (var_2kaffee && !var_automode) || (var_automode && (var_Siebtraeger_leer-gewicht_Delta_ok <= gewicht && gewicht <= var_Siebtraeger_leer+gewicht_Delta_ok)))
     {
-      Zustand = z_wiegen;
+      Zustand = z_mahlen;
       if (var_1kaffee&& !var_automode) var_1oder2 = 1; //Nur Variablen Auswahl
       if (var_2kaffee&& !var_automode) var_1oder2 = 0; //Nur Variablen Auswahl
     }
     if(var_statistik) Zustand = z_statistik;
       break;
-  case z_wiegen: // Wiegen
+  case z_mahlen: // Wiegen
     if(Zustand_alt != Zustand)
     {
       Zustand_alt = Zustand;
@@ -312,12 +316,18 @@ void loop()
       screensetting_automode(var_automode);
       if(var_gewichtoderrpm == 0) // Gewicht
       {
-        var_gewicht_1kaffee = zaehlen(var_gewicht_1kaffee, 100);
+        if (var_plus || var_minus)
+        {
+          var_gewicht_1kaffee = zaehlen(var_gewicht_1kaffee, 100);
+        }
       }
 
       if(var_gewichtoderrpm == 1) // rpm
       { 
-        var_rpm_1kaffee = zaehlen(var_rpm_1kaffee,1);
+        if (var_plus || var_minus)
+        {
+          var_rpm_1kaffee = zaehlen(var_rpm_1kaffee,1);
+        }
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
       {
@@ -334,11 +344,16 @@ void loop()
       screensetting_automode(var_automode);
       if(var_gewichtoderrpm == 0) // Gewicht
       {
-        var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee,100);
+        if (var_plus || var_minus)
+        {
+          var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee,100);
+        }
       }
       if(var_gewichtoderrpm == 1) // rpm
-      { 
-       var_rpm_2kaffee = zaehlen(var_rpm_2kaffee,1);
+      {
+        if (var_plus || var_minus)
+        { 
+          var_rpm_2kaffee = zaehlen(var_rpm_2kaffee,1);
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
       {
@@ -435,6 +450,7 @@ void loop()
   }
 
   reset();
+}
 }
 
 //Record the current system settings to EEPROM
@@ -1056,37 +1072,22 @@ void zurueck(void)
 
 float zaehlen(float value,int stelle = 0)
 {
-  if(digitalRead(var_plus) == HIGH)
+  if(var_plus == true)
     {
-      if(value<(32767+1-inkrement)) {                 //used to not get a overflow
-        value=value+inkrement/stelle;
+      if(value<(32767)) {                 //used to not get a overflow
+        value=value+1/stelle;
       }
-      if(value+inkrement >= 32767){value = 32767;}
-      Serial.println(value);                        //"returns" Value
-      time_up = millis();
-      while (millis() - time_up < 1000/(i+1) and digitalRead(var_plus) == HIGH){   //Mit der While Funktion ist die Zeit am anfang Lange und am ende Kurz die er Wartet um Hochzuzählen.
-        //do nothing
-        inkrement=i;
-      }
-      i++;
     }
 
     // same as Counting UP but DOWN---------------
-  if(digitalRead(var_minus) == HIGH)
+  if(var_minus == true)
   {
-    if(value>(-32768-1+inkrement)) {
-      value=value-inkrement;
+    if(value>(-32768-1)) {
+      value=value-1/stelle;
     }
     else{
       value=-32768;
     }
-    Serial.println(value);
-    time_down = millis();
-    while (millis() - time_down < 1000/(i+1) and digitalRead(var_minus) == HIGH){
-      //do nothing
-      inkrement=i;
-    }
-    i++;
   }
 
   //resets the inkrement and index i after realesing the buttons
@@ -1095,4 +1096,23 @@ float zaehlen(float value,int stelle = 0)
     inkrement=1;
   }
     return value;
+}
+
+
+float setValue(float value,int stelle = 0)
+{
+  if (var_plus == true){             // if only button 8 is pressed
+    counter++;
+    secondsHeld = counter/2;
+//***'INCREASE' CODE HERE***
+  }
+ 
+  else if (var_minus == true){        // if only button 2 is pressed
+    counter++;
+    secondsHeld = counter/2;
+//***'DECREASE' CODE HERE***
+  }
+  else {
+    counter = 0;
+  }
 }
