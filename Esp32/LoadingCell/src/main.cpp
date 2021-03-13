@@ -103,10 +103,9 @@ float var_Siebtraeger_leer=0;     //Gewicht des leeren Siebträgers
 bool finish = 0;                  //Flag symbolisiert Mahlmenge erreicht
 bool press_stop_again=false;      //Flag für erneutes Stop drücken bei der Abbruch-Routine
 bool first_start;                 //Resten des Eepromspeichers
-float gewicht_Delta_ok=0.5;       //Gewichtsabweichung für Fertig, Startklar...
+float gewicht_Delta_ok = 10;       //Gewichtsabweichung für Fertig, Startklar...
 
 float gewicht;                    //Gemessenes Gewicht
-float rpm;                        //Variable für die PWM zur ansteuerung des Motors
 String cmd = "\"";                //Hilfsvariable zum verhindern von Syntaxfehlern beim Senden von Text über Serial.print an das Display
 int Zustand = 1;                  //Zustand des Zustandsautomat
 int Zustand_alt = 0;              //Zustand des vorherigen Schleifendurchlaufs => ärkennung von änderungen
@@ -170,7 +169,7 @@ void screenfertig(void);
 void screencalibtext(void);
 void screencalibgewicht(void);
 void screentemp(float temp, float feuchtig);
-
+void screenstatistik(int value);
 
 void setup()
 {
@@ -195,7 +194,7 @@ void setup()
   ScaleInit();            
   ScreenInit();
 
- // initialize I2C that connects to sensor
+  //initialize I2C that connects to sensor
   BMESensor.begin();            // initalize bme280 sensor
 
   pinMode(pin_PWM, OUTPUT);
@@ -214,14 +213,13 @@ void setup()
 void loop()
 { 
   read_taster();
-  Wire.begin();
+  gewicht = wiegen();
+  //Wire.begin();
   BMESensor.refresh();
 
   temperature = BMESensor.temperature;
   humidity = BMESensor.humidity;
 
-  temperature = 35;
-  humidity = 50;
   switch (Zustand)
   {
   case z_home:
@@ -248,7 +246,8 @@ void loop()
     }
     if(var_set_release) Zustand = z_settings;
     if(var_cali_release) Zustand = z_calib;
-    if((var_1kaffee && !var_automode) || (var_2kaffee && !var_automode) || (var_automode && (var_Siebtraeger_leer-gewicht_Delta_ok <= gewicht && gewicht <= var_Siebtraeger_leer+gewicht_Delta_ok)))
+    
+    if((var_1kaffee && !var_automode) || (var_2kaffee && !var_automode) || (var_automode && ((var_Siebtraeger_leer-gewicht_Delta_ok <= gewicht) && (gewicht <= var_Siebtraeger_leer+gewicht_Delta_ok))))
     {
       Zustand = z_mahlen;
       if (var_1kaffee&& !var_automode) var_1oder2 = 1; //Nur Variablen Auswahl
@@ -261,21 +260,29 @@ void loop()
     {
       Zustand_alt = Zustand;
       page_main();
+      screentemp(temperature, humidity);
+      var_Siebtraeger_leer = 0;
+      screenWritingtext("Siebträger Nulln");
+      for (int i = 0; i<=9; i++)
+      {
+
+        var_Siebtraeger_leer += wiegen();
+      }
+      var_Siebtraeger_leer = var_Siebtraeger_leer/10;
+      
     }
     screentemp(temperature, humidity);
     if(var_stop) Zustand = z_abbruch;
 
     if(var_1oder2 == 1) // 1Kaffee
     {
-      gewicht = wiegen();
-      finish = mahlen(gewicht,  (var_rpm_1kaffee+var_Siebtraeger_leer),  (var_gewicht_1kaffee+var_Siebtraeger_leer));
+      finish = mahlen(gewicht,  (var_rpm_1kaffee),  (var_gewicht_1kaffee+var_Siebtraeger_leer));
       if(finish) Zustand = z_fertig;
       screenwiegen((gewicht - var_Siebtraeger_leer),  var_gewicht_1kaffee);
     }
     else   //2Kaffee
     {  
-      gewicht = wiegen();
-      finish = mahlen(gewicht,  (var_rpm_2kaffee+var_Siebtraeger_leer),  (var_gewicht_2kaffee+var_Siebtraeger_leer));
+      finish = mahlen(gewicht,  (var_rpm_2kaffee),  (var_gewicht_2kaffee+var_Siebtraeger_leer));
       if(finish) Zustand = z_fertig;
       screenwiegen((gewicht - var_Siebtraeger_leer),  var_gewicht_2kaffee);
     }
@@ -285,8 +292,10 @@ void loop()
     {
       Zustand_alt = Zustand;
       page_main();
+      var_thoughput_number += 1;
     }
     screenfertig();
+    screentemp(temperature, humidity);
     gewicht = wiegen();
     if (int(gewicht) <= 10) Zustand = 1;
     if (var_stop) Zustand = 1;
@@ -329,6 +338,9 @@ void loop()
         if (var_plus || var_minus)
         {
           var_gewicht_1kaffee = zaehlen(var_gewicht_1kaffee, 1);
+          if (var_gewicht_1kaffee > 300) var_rpm_1kaffee = 300;
+          else if(var_gewicht_1kaffee < 0) var_gewicht_1kaffee = 0;
+
         }
       }
 
@@ -337,6 +349,8 @@ void loop()
         if (var_plus || var_minus)
         {
           var_rpm_1kaffee = zaehlen(var_rpm_1kaffee,10);
+          if (var_rpm_1kaffee > 3000) var_rpm_1kaffee = 3000;
+          else if(var_rpm_1kaffee < 0) var_rpm_1kaffee = 0;
         }
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
@@ -357,6 +371,8 @@ void loop()
         if (var_plus || var_minus)
         {
           var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee, 1);
+          if (var_gewicht_2kaffee > 300) var_gewicht_2kaffee = 300;
+          else if(var_gewicht_2kaffee < 0) var_gewicht_2kaffee = 0;
         }
       }
       if(var_gewichtoderrpm == 1) // rpm
@@ -364,6 +380,8 @@ void loop()
         if (var_plus || var_minus)
         { 
           var_rpm_2kaffee = zaehlen(var_rpm_2kaffee,10);
+          if (var_rpm_2kaffee > 3000) var_rpm_2kaffee = 3000;
+          else if(var_rpm_2kaffee < 0) var_rpm_2kaffee = 0;
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
       {
@@ -393,6 +411,7 @@ void loop()
       Zustand_alt = Zustand;
       page_statistik();
     }
+    screenstatistik(var_thoughput_number);
     if(var_stop) Zustand = z_home;
     break;
   case z_calib: // Waage Calibriern
@@ -402,7 +421,7 @@ void loop()
       Calib_schritt=0;
       page_calib();
     }
-    if (var_stop) Zustand = z_home;
+    //if (var_stop) Zustand = z_home;
 
     switch(Calib_schritt){
       case 2:
@@ -543,12 +562,12 @@ void readSystemSettings(void)
   }
 
   //Look up the calibration factor
-  EEPROM.get(LOCATION_Throughput_number, var_thoughput_number);
-  if (var_thoughput_number == 0 || var_thoughput_number == NAN)
-  {
-    var_thoughput_number = 0; //Default to 0
-    EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
-  }
+  //EEPROM.get(LOCATION_Throughput_number, var_thoughput_number);
+  //if (var_thoughput_number == 0 || var_thoughput_number == NAN)
+  //{
+  //  var_thoughput_number = 0; //Default to 0
+  //  EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
+  //}
   
   EEPROM.get(LOCATION_first_start, first_start);
   if (first_start == 0 || first_start == NAN)
@@ -641,8 +660,11 @@ void page_calib(void){
 
 // Screen
 void screenwiegen(float aktuellgewicht, float zielgewicht)
-{
-  
+{ 
+  if (aktuellgewicht<0)
+  {
+    aktuellgewicht = 0;
+  }
   Serial.print("Wiegen");
   Serial.print("\n");
   // Bildschim initialisieren
@@ -882,6 +904,17 @@ void screen1kaffeeoder2kaffee(bool kaffee1oder2)
   }
 }
 
+void screenstatistik(int value)
+{
+  // Bildschim initialisieren
+  Serial1.print("t2.txt=" + cmd);
+  Serial1.print(value);
+  Serial1.print(cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF);
+}
+
 //Sonstige Funktionen
 float wiegen(void)
 {
@@ -899,11 +932,6 @@ float wiegen(void)
 
 
   return avgWeight;
-}
-
-float gramm2rpm(float gramm)
-{
-  return gramm*100;
 }
 
 void ScreenInit(void)
@@ -950,10 +978,8 @@ void ScaleInit(void)
 
 bool mahlen(float gewicht, float rpm, float zielgewicht)
 {
-  var_thoughput_number += 1;
-  EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
-  float volt = rpm/(3000/255); //Mahllogic
-  
+  //EEPROM.put(LOCATION_Throughput_number, var_thoughput_number);
+  int volt = 255*(rpm/3000); //Mahllogic
 
   if (gewicht > zielgewicht)
   {
@@ -1113,10 +1139,10 @@ float zaehlen(float value,int stelle)
 float runden(float value)
 { 
                             // 123.456;
-  value = value + 0.05;       //123.506
+  value = value + 0.05;     //123.506
   value = value*10.0;       //1235.06
-  int y = (int)value;    //1235
-  value = (float)y/10.0; //123.5
+  int y = (int)value;       //1235
+  value = (float)y/10.0;    //123.5
 
   return value;
 }
