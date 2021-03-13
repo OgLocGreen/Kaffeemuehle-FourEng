@@ -102,7 +102,7 @@ float var_Siebtraeger_leer=0;     //Gewicht des leeren Siebträgers
 //Zustandsautomat und Routinen
 bool finish = 0;                  //Flag symbolisiert Mahlmenge erreicht
 bool press_stop_again=false;      //Flag für erneutes Stop drücken bei der Abbruch-Routine
-bool first_start;                 //Resten des Eepromspeichers
+bool first_start = 0;                 //Resten des Eepromspeichers
 float gewicht_Delta_ok = 10;       //Gewichtsabweichung für Fertig, Startklar...
 
 float gewicht;                    //Gemessenes Gewicht
@@ -174,16 +174,17 @@ void screenstatistik(int value);
 void setup()
 {
   // Clearen von EEPROM falls var NAN
-
-  //EEPROM.get(LOCATION_first_start, first_start);
-  //if (first_start == 0)
-  //{
-  //  first_start += 1;
-  //  EEPROM.put(LOCATION_first_start, first_start);
-  //  for (int i = 0 ; i < EEPROM.length() ; i++) {
-  //  EEPROM.write(i, 0);
-  //}
-  //}
+  /*
+  EEPROM.get(LOCATION_first_start, first_start);
+  if (first_start == 0)
+  {
+    first_start += 1;
+    EEPROM.put(LOCATION_first_start, first_start);
+    for (int i = 0 ; i < EEPROM.length() ; i++) {
+    EEPROM.write(i, 0);
+  }
+  }
+  */
   
   Zustand = z_home;
 
