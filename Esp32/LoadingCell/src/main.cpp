@@ -1,16 +1,26 @@
+/*
+Kaffeemühle Four-Eng
+Ersteller: Christain Heinzmann, Maximilian Mantel
+Zustandasautomat der Kaffeemühle welcher die Bedienung, Ansteuerung der Wage, Motor und Display abhandelt.
+
+In dieser Version wurde versucht die Hardware Taster welche über die I/O ports des Arduino ausgelesen werden
+durch die Schaltflächen des Nextion- TouchDisplays zu ersetzen.
+
+Hierfür wurden folgende Funktionen angepasst:
+-void test_taster(void);
+-bool release(int pin, bool alter_zustand);
+und zusätzlich wurde die Funktion "void touchinput(void)" eingeführt.
+
+*/
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <EEPROM.h> //Needed to record user settings
 #include "SparkFun_Qwiic_Scale_NAU7802_Arduino_Library.h" // Click here to get the library: http://librarymanager/All#SparkFun_NAU8702
 #include <string.h>
 #include <time.h>
-#include <Wire.h>
 #include <BME280_t.h>
 
-
-
-
-NAU7802 myScale; //Create instance of the NAU7802 class
 
 //EEPROM locations to store 4-byte variables
 #define LOCATION_CALIBRATION_FACTOR 0 //Float, requires 4 bytes of EEPROM
@@ -23,17 +33,11 @@ NAU7802 myScale; //Create instance of the NAU7802 class
 #define LOCATION_Throughput_number 35
 #define LOCATION_first_start 40
 
-bool settingsDetected = false; //Used to prompt user to calibrate their scale
+//------------------Definition für bessere lesbarkeit des Codes-----------------
 
-//Create an array to take average of weights. This helps smooth out jitter.
-#define AVG_SIZE 20
-float avgWeights[AVG_SIZE];
-byte avgWeightSpot = 0;
+//Definiton der Tasten-Pinbelegung um Pins mit Namen statt Zahlen anzusprechen
+//Wird für die Hardware-Taster verwendet
 
-//#define RXD 1
-//#define TXD 3
-//#define RXD2 16
-//#define TXD2 17
 #define pin_PWM 2
 #define pin_set 13
 #define pin_statistik 12
@@ -44,6 +48,7 @@ byte avgWeightSpot = 0;
 #define pin_minus 7
 #define pin_plus 6
 
+//Definition der Zustände für den Zustandsautomaten der Kaffeemühle
 #define z_home 1
 #define z_mahlen 2
 #define z_fertig 3
@@ -52,6 +57,8 @@ byte avgWeightSpot = 0;
 #define z_statistik 6
 #define z_calib 7
 
+//------------------Variablen-----------------
+//Zustandsvariable der Taster/Touchflächen 
 bool var_set = 0;
 bool var_stop = 0;
 bool var_cali = 0;
@@ -60,7 +67,7 @@ bool var_minus = 0;
 bool var_1kaffee = 0;
 bool var_2kaffee = 0;
 bool var_statistik = 0;
-
+//Hilfs variablen mit zustand des vorhärigen Schleifendurchlaufs zur erkennung der fallenden Flanke
 bool var_set_alt = 0;
 bool var_stop_alt = 0;
 bool var_cali_alt = 0;
@@ -69,7 +76,7 @@ bool var_minus_alt = 0;
 bool var_1kaffee_alt = 0;
 bool var_2kaffee_alt = 0;
 bool var_statistik_alt = 0;
-
+//Variable zur darstellung der fallenden Flanken
 bool var_set_release = 0;
 bool var_stop_release = 0;
 bool var_cali_release = 0;
@@ -78,78 +85,80 @@ bool var_minus_release = 0;
 bool var_1kaffee_release = 0;
 bool var_2kaffee_release = 0;
 bool var_statistik_release = 0;
+//-------------------Variablen für den Zustandsautomaten----------------
+//Settings
+int var_gewichtoderrpm = 0; // Unterzustand für Settingmenue. Welcher Wert geaendert wird 1 Gewicht 0 rpm  2 Automode
+bool var_1oder2 = 1;        // Auswahl welche Werte im Setting angezeit/eingestellt werden bzw. welchee Einstellung gemahlen werden soll. 1->1Kaffee 0->2Kaffee
 
-int var_gewichtoderrpm = 0; // 1 Gewicht 0 rpm
-bool var_1oder2 = 1;        // 1 1Kaffee 0 2Kaffee
-float var_gewicht_1kaffee = 30;
-float var_rpm_1kaffee = 1000;
-float var_gewicht_2kaffee = 35;
-float var_rpm_2kaffee = 2000;
-bool finish = 0;
-bool press_stop_again=false;
+float var_gewicht_1kaffee = 30;    //Gewicht für Taste 1Kaffee
+float var_rpm_1kaffee = 1000;      //Drehzahl voreistellung für Taste 1Kaffee
+float var_gewicht_2kaffee = 35;    //Gewicht für Taste 2Kaffee
+float var_rpm_2kaffee = 2000;      //Drehzahl voreistellung für Taste 1Kaffee
 
-int var_thoughput_number = 0;
+int var_thoughput_number = 0;      //Anzahl von Gemahlen Kaffees
+bool var_automode=false;          // True=>automatischer start bei Erkennung des leeren Siebträgers
+float var_Siebtraeger_leer=0;     //Gewicht des leeren Siebträgers
 
-bool var_automode=false; // True=>automatischer start bei Erkennung des leeren Siebträgers
-float var_Siebtraeger_leer=0;
-float gewicht_Delta_ok=0.5; //Gewichtsabweichung für Fertig, Startklar...
-bool first_start;
+//Zustandsautomat und Routinen
+bool finish = 0;                  //Flag symbolisiert Mahlmenge erreicht
+bool press_stop_again=false;      //Flag für erneutes Stop drücken bei der Abbruch-Routine
+bool first_start;                 //Resten des Eepromspeichers
+float gewicht_Delta_ok=0.5;       //Gewichtsabweichung für Fertig, Startklar...
 
-float gewicht;
-float rpm;
-String cmd = "\"";
-int Zustand = 1;
-int Zustand_alt = 0;
-int Calib_schritt=0;
+float gewicht;                    //Gemessenes Gewicht
+float rpm;                        //Variable für die PWM zur ansteuerung des Motors
+String cmd = "\"";                //Hilfsvariable zum verhindern von Syntaxfehlern beim Senden von Text über Serial.print an das Display
+int Zustand = 1;                  //Zustand des Zustandsautomat
+int Zustand_alt = 0;              //Zustand des vorherigen Schleifendurchlaufs => ärkennung von änderungen
+int Calib_schritt=0;              //Unterzustand innerhal der Calibrier-Routine
+float temperature = 0;            //Variable für Umgebungstemp
+float humidity = 0;               //Variable für Luftfeuchtigkeit
+int inkrement=0;                  //Variable für schnelles Zählen
 
-// variables will change:
-// variable for reading the pushbutton status
-int buttonState_up = 0;
-int buttonState_down = 0; 
-// value is controled by the two buttons
-int value=0;
-// used to meassure how long the buttons a pressd
-unsigned long time_up;
-unsigned long time_down;
-// inkrement to change the value
-int inkrement=0;
-
-
-float temperature;
-float humidity;
-
+//------------------Senordekleration und Funktionen-----------------
 
 //BME Sensor
 #define ASCII_ESC 27
 #define MYALTITUDE  150.50
 char bufout[10];
-BME280<> BMESensor; 
-
-//Taster input
-void read_taster(void);
-void test_taster(void);
-bool release(int pin, bool alter_zustand);
+BME280<> BMESensor;   
+void BmeInit(void);                   //Initalisieren des BME
 
 //Scale
-//void calibrateScale(void);
-void recordSystemSettings(void);
-void readSystemSettings(void);
+NAU7802 myScale; //Create instance of the NAU7802 class
+bool settingsDetected = false; //Used to prompt user to calibrate their scale
+//Create an array to take average of weights. This helps smooth out jitter.
+#define AVG_SIZE 20  
+float avgWeights[AVG_SIZE];
+byte avgWeightSpot = 0;
+void ScaleInit(void);                 // Initalisieren der Wägezelle
+void recordSystemSettings(void);      //Speichern aller Setings im EEPROM damit werte auch im Spannungslosen zustand nicht verlohren gehen.
+void readSystemSettings(void);        //Lesen der Gespeicherten Werte beim Einschalten
 
-//Bme Sensor
-void BmeInit(void);
+//------------------Funktionsdekleration-----------------
 
 //Funktionen
-float wiegen(void);
-bool mahlen(float gewicht, float rpm, float zielgewicht);
-void reset(void);
-void zurueck(void);
+float wiegen(void);                                            //wiegen des Gewichts
+bool mahlen(float gewicht, float rpm, float zielgewicht);      //mahlen des Kaffees ansteuern Motor
+void reset(void);                                              // zurücksetzen der var_   
 float zaehlen(float value, int stelle);
-float runden(float value);
+float runden(float value);    
+void read_taster(void);                                        //Erkennung der gedrückent Tasten
+void test_taster(void);                                        //Hilfsfunktion für Testzwecke: gibt gedrückte Tasten am Serial Monitor des über USB angeschlossen PC aus.
+bool release(int pin, bool alter_zustand);                     //Erkennung der Fallenden Flanke der Tasten
 
 
-//Screen
+
+//-----------------Display--------------------------------
+//Pages             //Umschalten der Pages des Nextion-Displays über Serialle-Schnittstelle
+void page_statistik(void);
+void page_abbruch(void);
+void page_set(void);
+void page_main(void);
+void page_calib(void);
+
+//Screen          //Funktionen zum füllen und aktualisieren der Test Felder des Nextion-Displays über Serialle-Schnittstelle
 void ScreenInit(void);
-void ScaleInit(void);
 void screenWritingtext(String text);
 void screenwiegen(float aktuellgewicht, float zielgewicht);
 void screensettinggewicht(float zielgewicht);
@@ -161,14 +170,6 @@ void screenfertig(void);
 void screencalibtext(void);
 void screencalibgewicht(void);
 void screentemp(float temp, float feuchtig);
-
-
-//Pages
-void page_statistik(void);
-void page_abbruch(void);
-void page_set(void);
-void page_main(void);
-void page_calib(void);
 
 
 void setup()
@@ -187,11 +188,11 @@ void setup()
   
   Zustand = z_home;
 
-  Serial.begin(9600);
-  Serial1.begin(9600);  //Screen
-  Serial2.begin(9600);  //Arduino
+  Serial.begin(9600);     //Serialle-Schnittstelle zum Computer USB Hautsächlich für Test und Debug zwecke
+  Serial1.begin(9600);    //Serielle-Schnittstelle zum Nextion-Display /Umschalten der Pages, füllen der Textfelder und empfangen der Toucheingabe
 
-  ScaleInit();
+
+  ScaleInit();            
   ScreenInit();
 
  // initialize I2C that connects to sensor
@@ -355,7 +356,7 @@ void loop()
       {
         if (var_plus || var_minus)
         {
-          var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee,1);
+          var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee, 1);
         }
       }
       if(var_gewichtoderrpm == 1) // rpm
@@ -558,73 +559,7 @@ void readSystemSettings(void)
 
 }
 
-float wiegen(void)
-{
-  long currentReading = myScale.getReading();
-  float currentWeight = myScale.getWeight();
-
-  avgWeights[avgWeightSpot++] = currentWeight;
-  if(avgWeightSpot == AVG_SIZE) avgWeightSpot = 0;
-
-  // Mitteln von AVG_SIZE Werten
-  float avgWeight = 0;
-  for (int x = 0 ; x < AVG_SIZE ; x++)
-    avgWeight += avgWeights[x];
-  avgWeight /= AVG_SIZE;
-
-
-  return avgWeight;
-}
-
-float gramm2rpm(float gramm)
-{
-  return gramm*100;
-}
-
-void ScreenInit(void)
-{
-    // Bildschim initialisieren
-  page_main();
-  Serial1.print("t0.txt=" + cmd + " " + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF);
-  Serial1.print("t0.txt=" + cmd + " " + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
-}
-
-void ScaleInit(void)
-{
-  Wire.begin();
-  Wire.setClock(400000); //Qwiic Scale is capable of running at 400kHz if desired
-
-  if (myScale.begin() == false)
-  {
-    Serial.println("Scale not detected. Please check wiring. Freezing...");
-    //while (1);
-  }
-  Serial.println("Scale detected!");
-
-
-  Serial.print("Bevor Readsetting");
-  Serial.print(var_gewicht_2kaffee);
-  readSystemSettings(); //Load zeroOffset and calibrationFactor from EEPROM
-  Serial.print("nach Settings");
-  Serial.print(var_gewicht_2kaffee);
-
-  myScale.setSampleRate(NAU7802_SPS_320); //Increase to max sample rate
-  myScale.calibrateAFE(); //Re-cal analog front end when we change gain, sample rate, or channel 
-
-  Serial.print("Zero offset: ");
-  Serial.println(myScale.getZeroOffset());
-  Serial.print("Calibration factor: ");
-  Serial.println(myScale.getCalibrationFactor());
-}
-
 // Für jeden Zustand wird eine Seite erstellt.
-
 void page_main(void) {
   Serial1.print("page page0");
   Serial1.write(0xFF);
@@ -704,8 +639,7 @@ void page_calib(void){
   Serial1.write(0xFF);
 }
 
-
-
+// Screen
 void screenwiegen(float aktuellgewicht, float zielgewicht)
 {
   
@@ -737,7 +671,6 @@ void screentemp(float temp, float feuchtig)
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
 }
-
 
 void screenWritingtext(String text)
 {
@@ -949,6 +882,72 @@ void screen1kaffeeoder2kaffee(bool kaffee1oder2)
   }
 }
 
+//Sonstige Funktionen
+float wiegen(void)
+{
+  long currentReading = myScale.getReading();
+  float currentWeight = myScale.getWeight();
+
+  avgWeights[avgWeightSpot++] = currentWeight;
+  if(avgWeightSpot == AVG_SIZE) avgWeightSpot = 0;
+
+  // Mitteln von AVG_SIZE Werten
+  float avgWeight = 0;
+  for (int x = 0 ; x < AVG_SIZE ; x++)
+    avgWeight += avgWeights[x];
+  avgWeight /= AVG_SIZE;
+
+
+  return avgWeight;
+}
+
+float gramm2rpm(float gramm)
+{
+  return gramm*100;
+}
+
+void ScreenInit(void)
+{
+    // Bildschim initialisieren
+  page_main();
+  Serial1.print("t0.txt=" + cmd + " " + cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF);
+  Serial1.print("t0.txt=" + cmd + " " + cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF); 
+}
+
+void ScaleInit(void)
+{
+  Wire.begin();
+  Wire.setClock(400000); //Qwiic Scale is capable of running at 400kHz if desired
+
+  if (myScale.begin() == false)
+  {
+    Serial.println("Scale not detected. Please check wiring. Freezing...");
+    //while (1);
+  }
+  Serial.println("Scale detected!");
+
+
+  Serial.print("Bevor Readsetting");
+  Serial.print(var_gewicht_2kaffee);
+  readSystemSettings(); //Load zeroOffset and calibrationFactor from EEPROM
+  Serial.print("nach Settings");
+  Serial.print(var_gewicht_2kaffee);
+
+  myScale.setSampleRate(NAU7802_SPS_320); //Increase to max sample rate
+  myScale.calibrateAFE(); //Re-cal analog front end when we change gain, sample rate, or channel 
+
+  Serial.print("Zero offset: ");
+  Serial.println(myScale.getZeroOffset());
+  Serial.print("Calibration factor: ");
+  Serial.println(myScale.getCalibrationFactor());
+}
+
 bool mahlen(float gewicht, float rpm, float zielgewicht)
 {
   var_thoughput_number += 1;
@@ -1063,15 +1062,6 @@ bool release(int pin, bool alter_zustand){
   }
   else{
     return false;
-  }
-}
-
-void zurueck(void)
-{
-  if(press_stop_again&&var_stop_release){
-  Zustand = z_home;
-  press_stop_again=false;
-
   }
 }
 
