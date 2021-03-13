@@ -97,7 +97,6 @@ bool first_start;
 
 float gewicht;
 float rpm;
-int numb;
 String cmd = "\"";
 int Zustand = 1;
 int Zustand_alt = 0;
@@ -113,13 +112,11 @@ int value=0;
 unsigned long time_up;
 unsigned long time_down;
 // inkrement to change the value
-int inkrement=1;
-// used to adjust the inkrement
-int i=0;
+int inkrement=0;
 
 
-int counter;
-int secondsHeld;
+float temperature;
+float humidity;
 
 
 //BME Sensor
@@ -132,6 +129,7 @@ BME280<> BMESensor;
 void read_taster(void);
 void test_taster(void);
 bool release(int pin, bool alter_zustand);
+
 //Scale
 //void calibrateScale(void);
 void recordSystemSettings(void);
@@ -140,14 +138,13 @@ void readSystemSettings(void);
 //Bme Sensor
 void BmeInit(void);
 
-
 //Funktionen
 float wiegen(void);
 bool mahlen(float gewicht, float rpm, float zielgewicht);
 void reset(void);
 void zurueck(void);
 float zaehlen(float value, int stelle);
-float setValue(float value,int stelle = 0);
+float runden(float value);
 
 
 //Screen
@@ -163,6 +160,7 @@ void screen1kaffeeoder2kaffee(bool kaffee1oder2);
 void screenfertig(void);
 void screencalibtext(void);
 void screencalibgewicht(void);
+void screentemp(float temp, float feuchtig);
 
 
 //Pages
@@ -171,6 +169,7 @@ void page_abbruch(void);
 void page_set(void);
 void page_main(void);
 void page_calib(void);
+
 
 void setup()
 {
@@ -195,8 +194,8 @@ void setup()
   ScaleInit();
   ScreenInit();
 
-                                               // initialize I2C that connects to sensor
-  BMESensor.begin();                                                    // initalize bme280 sensor
+ // initialize I2C that connects to sensor
+  BMESensor.begin();            // initalize bme280 sensor
 
   pinMode(pin_PWM, OUTPUT);
 
@@ -214,19 +213,17 @@ void setup()
 void loop()
 { 
   read_taster();
-  //test_taster();
-  //Serial.print(Zustand);
-  //Serial.print(gewicht);
-  //gewicht = wiegen();
-  //Serial.print(var_gewicht_2kaffee);
   Wire.begin();
   BMESensor.refresh();
 
+  temperature = BMESensor.temperature;
+  humidity = BMESensor.humidity;
 
+  temperature = 35;
+  humidity = 50;
   switch (Zustand)
   {
   case z_home:
-    //screenWritingtext("Bereit!");
     if(Zustand_alt != Zustand) 
     { 
       Zustand_alt = Zustand;
@@ -237,6 +234,9 @@ void loop()
       }
       else{screenWritingtext("Bereit!");}
     }
+
+    screentemp(temperature, humidity);
+
     if(var_automode&&var_1kaffee_release){
       var_1oder2=true;
       screen1kaffeeoder2kaffee(var_1oder2);
@@ -255,12 +255,13 @@ void loop()
     }
     if(var_statistik) Zustand = z_statistik;
       break;
-  case z_mahlen: // Wiegen
+  case z_mahlen: // mahlen
     if(Zustand_alt != Zustand)
     {
       Zustand_alt = Zustand;
       page_main();
     }
+    screentemp(temperature, humidity);
     if(var_stop) Zustand = z_abbruch;
 
     if(var_1oder2 == 1) // 1Kaffee
@@ -290,12 +291,20 @@ void loop()
     if (var_stop) Zustand = 1;
     break;
   case z_settings: // Setting
+
     if(Zustand_alt != Zustand)
     {
       Zustand_alt = Zustand;
       var_gewichtoderrpm = 0;
       page_set();
     }
+
+    //resets the inkrement and index i after realesing the buttons
+    if (var_minus_release == true || var_plus_release == true) {
+      inkrement=0;
+    }
+
+
     screen1kaffeeoder2kaffee(var_1oder2);
 
     if (var_stop){
@@ -318,7 +327,7 @@ void loop()
       {
         if (var_plus || var_minus)
         {
-          var_gewicht_1kaffee = zaehlen(var_gewicht_1kaffee, 100);
+          var_gewicht_1kaffee = zaehlen(var_gewicht_1kaffee, 1);
         }
       }
 
@@ -326,7 +335,7 @@ void loop()
       { 
         if (var_plus || var_minus)
         {
-          var_rpm_1kaffee = zaehlen(var_rpm_1kaffee,1);
+          var_rpm_1kaffee = zaehlen(var_rpm_1kaffee,10);
         }
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
@@ -346,14 +355,14 @@ void loop()
       {
         if (var_plus || var_minus)
         {
-          var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee,100);
+          var_gewicht_2kaffee = zaehlen(var_gewicht_2kaffee,1);
         }
       }
       if(var_gewichtoderrpm == 1) // rpm
       {
         if (var_plus || var_minus)
         { 
-          var_rpm_2kaffee = zaehlen(var_rpm_2kaffee,1);
+          var_rpm_2kaffee = zaehlen(var_rpm_2kaffee,10);
       }
       if(var_gewichtoderrpm == 2) // Auto/Manuel mode
       {
@@ -392,55 +401,56 @@ void loop()
       Calib_schritt=0;
       page_calib();
     }
-      switch(Calib_schritt){
-        case 2:
-          if (var_stop) z_home;
-          screenWritingtext("Gewicht entnehmen und Siebtraeger einsetzen. Mit Calib. Taste fortfahren");
-          Serial.println("Gewicht entnehmen und siebträger einsetzen.");
-          screencalibgewicht();
+    if (var_stop) Zustand = z_home;
 
-          //bei Calib taste drücken und loslassen
-          if(var_cali_release){
-            //Gewicht des leeren Siebträgers Speichern!!!
-            var_Siebtraeger_leer=wiegen();
-            Calib_schritt=3;
-          }
-          break;
-        case 1:
-          //"100 gramm einsetzen." Anzeigen
-          screenWritingtext("100 gramm einsetzen. Mit Calib. Taste fortfahren");
-          screencalibgewicht();
+    switch(Calib_schritt){
+      case 2:
+        screenWritingtext("Gewicht entnehmen und Siebtraeger einsetzen. Mit Calib. Taste fortfahren");
+        Serial.println("Gewicht entnehmen und siebträger einsetzen.");
+        screencalibgewicht();
 
-          Serial.println("100 gramm einsetzen.");
-          //bei Calib taste drücken und loslassen
-          if(var_cali_release){
-            //Steigung anpassen!!!
-            myScale.calculateCalibrationFactor(100.0, 64); //Tell the library how much weight is currently on it
-            Calib_schritt=2;
-          }
-          break;
-        case 0:
-          //"Aufnahme leeren." Anzeigen
-          screenWritingtext("Aufnahme leeren. Mit Calib. Taste fortfahren");
-          screencalibgewicht();
+        //bei Calib taste drücken und loslassen
+        if(var_cali_release){
+          //Gewicht des leeren Siebträgers Speichern!!!
+          var_Siebtraeger_leer=wiegen();
+          Calib_schritt=3;
+        }
+        break;
+      case 1:
+        //"100 gramm einsetzen." Anzeigen
+        screenWritingtext("100 gramm einsetzen. Mit Calib. Taste fortfahren");
+        screencalibgewicht();
 
-          Serial.println("Aufnahme leeren.");
-          //bei Calib taste drücken und loslassen 
-          if(var_cali_release){
-            //Nullpunkt wage Ermitteln!!!
-            myScale.calculateZeroOffset(64); //Zero or Tare the scale. Average over 64 readings.
-            Calib_schritt=1;
-          }
-          break;
-        case 3:
-          screenWritingtext("Fertig!");
-          screencalibgewicht();
-          recordSystemSettings(); //Commit these values to EEPROM
-          delay(3000);
-          Zustand = z_home;
-          break;
-        default:
-          Serial.println("default in Calibrierrutine!");
+        Serial.println("100 gramm einsetzen.");
+        //bei Calib taste drücken und loslassen
+        if(var_cali_release){
+          //Steigung anpassen!!!
+          myScale.calculateCalibrationFactor(100.0, 64); //Tell the library how much weight is currently on it
+          Calib_schritt=2;
+        }
+        break;
+      case 0:
+        //"Aufnahme leeren." Anzeigen
+        screenWritingtext("Aufnahme leeren. Mit Calib. Taste fortfahren");
+        screencalibgewicht();
+
+        Serial.println("Aufnahme leeren.");
+        //bei Calib taste drücken und loslassen 
+        if(var_cali_release){
+          //Nullpunkt wage Ermitteln!!!
+          myScale.calculateZeroOffset(64); //Zero or Tare the scale. Average over 64 readings.
+          Calib_schritt=1;
+        }
+        break;
+      case 3:
+        screenWritingtext("Fertig!");
+        screencalibgewicht();
+        recordSystemSettings(); //Commit these values to EEPROM
+        delay(3000);
+        Zustand = z_home;
+        break;
+      default:
+        Serial.println("default in Calibrierrutine!");
       }
     break;
   default: // Error
@@ -553,14 +563,8 @@ float wiegen(void)
   long currentReading = myScale.getReading();
   float currentWeight = myScale.getWeight();
 
-  //Serial.print("\tReading: ");
-  //Serial.print(currentReading);
-  //Serial.print("\tWeight: ");
-  //Serial.print(currentWeight, 2); //Print 2 decimal places
-
   avgWeights[avgWeightSpot++] = currentWeight;
   if(avgWeightSpot == AVG_SIZE) avgWeightSpot = 0;
-
 
   // Mitteln von AVG_SIZE Werten
   float avgWeight = 0;
@@ -568,14 +572,6 @@ float wiegen(void)
     avgWeight += avgWeights[x];
   avgWeight /= AVG_SIZE;
 
-
-  //Serial.print("\tAvgWeight: ");
-  //Serial.print(avgWeight, 2); //Print 2 decimal places
- // //if(settingsDetected == false)
- // //{
- // //  Serial.print("\tScale not calibrated. Press 'c'.");
- // //}
-  //Serial.println();
 
   return avgWeight;
 }
@@ -634,11 +630,15 @@ void page_main(void) {
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b3.txt=" + cmd + var_gewicht_1kaffee + cmd);
+  Serial1.print("b3.txt=" + cmd );
+  Serial1.print(var_gewicht_1kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b4.txt=" + cmd + var_gewicht_2kaffee + cmd);
+  Serial1.print("b4.txt=" + cmd);
+  Serial1.print(var_gewicht_2kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -649,15 +649,21 @@ void page_set(void) {
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b3.txt=" + cmd + var_gewicht_1kaffee + cmd);
+  Serial1.print("b3.txt=" + cmd);
+  Serial1.print(var_gewicht_1kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b4.txt=" + cmd + var_gewicht_2kaffee + cmd);
+  Serial1.print("b4.txt=" + cmd);
+  Serial1.print(var_gewicht_2kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t6.txt=" + cmd + var_Siebtraeger_leer + cmd);
+  Serial1.print("t6.txt=" + cmd);
+  Serial1.print(var_Siebtraeger_leer);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -669,11 +675,15 @@ void page_abbruch(void) {
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b3.txt=" + cmd + var_gewicht_1kaffee + cmd);
+  Serial1.print("b3.txt=" + cmd);
+  Serial1.print(var_gewicht_1kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("b4.txt=" + cmd + var_gewicht_2kaffee + cmd);
+  Serial1.print("b4.txt=" + cmd);
+  Serial1.print(var_gewicht_2kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -694,17 +704,40 @@ void page_calib(void){
   Serial1.write(0xFF);
 }
 
+
+
 void screenwiegen(float aktuellgewicht, float zielgewicht)
 {
   
   Serial.print("Wiegen");
   Serial.print("\n");
   // Bildschim initialisieren
-  Serial1.print("t0.txt=" + cmd + aktuellgewicht + cmd);
+  Serial1.print("t0.txt=" + cmd);
+  Serial1.print(aktuellgewicht,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
 }
+
+void screentemp(float temp, float feuchtig)
+{
+    // Bildschim initialisieren
+  Serial1.print("t3.txt=" + cmd);
+  Serial1.print(temp,1);
+  Serial1.print(cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF);
+
+  Serial1.print("t4.txt=" + cmd);
+  Serial1.print(feuchtig,1);
+  Serial1.print(cmd);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF); 
+  Serial1.write(0xFF);
+}
+
 
 void screenWritingtext(String text)
 {
@@ -721,7 +754,9 @@ void screencalibgewicht(void)
 {
   float tmp_gewicht = 0;
   tmp_gewicht = wiegen();
-  Serial1.print("t2.txt=" + cmd + tmp_gewicht + cmd);
+  Serial1.print("t2.txt=" + cmd);
+  Serial1.print(tmp_gewicht,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -743,23 +778,25 @@ void screensettinggewicht(float zielgewicht)
   Serial.print("Setting gewicht");
   Serial.print("\n");
   // Bildschim initialisieren
-  Serial1.print("t3.txt=" + cmd + zielgewicht + cmd);
+  Serial1.print("t3.txt=" + cmd);
+  Serial1.print(zielgewicht,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
-  Serial1.print("t3.txt=" + cmd + zielgewicht + cmd);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF); 
-  Serial1.write(0xFF); 
 
   if(var_1oder2){
-    Serial1.print("b3.txt=" + cmd + var_gewicht_1kaffee + cmd);
+    Serial1.print("b3.txt=" + cmd);
+    Serial1.print(var_gewicht_1kaffee,1);
+    Serial1.print(cmd);
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
     Serial1.write(0xFF);
   }
   else{
-  Serial1.print("b4.txt=" + cmd + var_gewicht_2kaffee + cmd);
+  Serial1.print("b4.txt=" + cmd);
+  Serial1.print(var_gewicht_2kaffee,1);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -772,7 +809,9 @@ void screensettingrpm(float rpm)
   Serial.print("\n");
 
   // Bildschim initialisieren
-  Serial1.print("t4.txt=" + cmd + rpm + cmd);
+  Serial1.print("t4.txt=" + cmd);
+  Serial1.print(rpm,0);
+  Serial1.print(cmd);
   Serial1.write(0xFF);
   Serial1.write(0xFF); 
   Serial1.write(0xFF);
@@ -782,18 +821,6 @@ void screengewichtoderrpm(int gewichtoderrpm)
 {
   if (gewichtoderrpm==0)
   {
-
-    // Bildschim initialisieren
-    Serial1.print("p0.pic=" + cmd + 1 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
-    Serial1.print("p1.pic=" + cmd + 0 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
 
     // Bildschim initialisieren
     Serial1.print("t1.bco=40179");
@@ -824,17 +851,6 @@ void screengewichtoderrpm(int gewichtoderrpm)
   if (gewichtoderrpm==1)
   {
     // Bildschim initialisieren
-    Serial1.print("p0.pic="  + cmd + 0 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
-    Serial1.print("p1.pic=" + cmd + 1 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
-    // Bildschim initialisieren
     Serial1.print("t1.bco=65525");
     Serial1.write(0xFF);
     Serial1.write(0xFF); 
@@ -862,17 +878,6 @@ void screengewichtoderrpm(int gewichtoderrpm)
   }
   if (gewichtoderrpm==2)
   {
-    // Bildschim initialisieren
-    Serial1.print("p0.pic="  + cmd + 0 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
-    Serial1.print("p1.pic=" + cmd + 1 + cmd);
-    Serial1.write(0xFF);
-    Serial1.write(0xFF); 
-    Serial1.write(0xFF);
-
     // Bildschim initialisieren
     Serial1.print("t1.bco=65525");
     Serial1.write(0xFF);
@@ -1070,49 +1075,58 @@ void zurueck(void)
   }
 }
 
-float zaehlen(float value,int stelle = 0)
+float zaehlen(float value,int stelle)
 {
   if(var_plus == true)
     {
-      if(value<(32767)) {                 //used to not get a overflow
-        value=value+1/stelle;
+      if(value<32767) {                 //used to not get a overflow
+        if (inkrement>=10 && inkrement<30)
+        {
+          value=value+(0.1*stelle*10);
+        }
+        else if(inkrement>=30)
+        {
+          value=value+(0.1*stelle*100);
+        }
+        else 
+        {
+          value=value+(0.1*stelle);
+        }
       }
     }
 
     // same as Counting UP but DOWN---------------
   if(var_minus == true)
   {
-    if(value>(-32768-1)) {
-      value=value-1/stelle;
+    if(value>(-32768)) {
+      if (inkrement>=10 && inkrement<30)
+      {
+        value=value-(0.1*stelle*10);
+      }
+      else if (inkrement>=30)
+      {
+        value=value-(0.1*stelle*100);
+      }
+      else
+      {
+      value=value-(0.1*stelle);
+      }
     }
     else{
       value=-32768;
     }
   }
-
-  //resets the inkrement and index i after realesing the buttons
-  if (var_minus_release == LOW && var_plus_release == LOW) {
-    i=0;
-    inkrement=1;
-  }
-    return value;
+  inkrement+=1;
+  return value;
 }
 
+float runden(float value)
+{ 
+                            // 123.456;
+  value = value + 0.05;       //123.506
+  value = value*10.0;       //1235.06
+  int y = (int)value;    //1235
+  value = (float)y/10.0; //123.5
 
-float setValue(float value,int stelle = 0)
-{
-  if (var_plus == true){             // if only button 8 is pressed
-    counter++;
-    secondsHeld = counter/2;
-//***'INCREASE' CODE HERE***
-  }
- 
-  else if (var_minus == true){        // if only button 2 is pressed
-    counter++;
-    secondsHeld = counter/2;
-//***'DECREASE' CODE HERE***
-  }
-  else {
-    counter = 0;
-  }
+  return value;
 }
