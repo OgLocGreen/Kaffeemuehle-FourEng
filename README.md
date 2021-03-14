@@ -1,4 +1,6 @@
-## About The Project
+# Kaffeemuehle-FourEng
+
+## Overview
 
 This project is a research and development project of the [Karlsruhe University of Applied Sciences](https://www.hs-karlsruhe.de/). 
 
