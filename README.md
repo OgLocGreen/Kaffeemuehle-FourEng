@@ -16,3 +16,7 @@ There you can find the following information:
 * Flow chart
 * Feed diagram
 
+## Branches
+* main -> Input is via Buttons
+* Display_Input -> Input is via a Nextion display
+
